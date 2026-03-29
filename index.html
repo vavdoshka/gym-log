@@ -602,6 +602,28 @@
     </div>
   </div>
 
+  <!-- Exercise Info Modal -->
+  <div class="modal-overlay" id="exercise-info-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="exercise-info-name"></div>
+        <button class="modal-close" onclick="closeExerciseInfoModal()">&times;</button>
+      </div>
+      <div class="card mb-3">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">MUSCLES WORKED</div>
+        <div id="exercise-info-muscles" style="font-weight:600;font-size:15px;"></div>
+      </div>
+      <div class="card mb-3">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">FORM TIP</div>
+        <div id="exercise-info-tip" style="font-size:14px;line-height:1.6;"></div>
+      </div>
+      <a id="exercise-info-link" href="#" target="_blank" class="btn btn-secondary btn-block" style="text-decoration:none;">
+        <i class="fab fa-youtube" style="color:#ff0000;"></i> Watch Tutorial on YouTube
+      </a>
+      <button class="btn btn-primary btn-block mt-2" onclick="closeExerciseInfoModal()">Got it</button>
+    </div>
+  </div>
+
   <!-- Import Plan Modal -->
   <div class="modal-overlay" id="import-modal">
     <div class="modal">
@@ -1006,7 +1028,12 @@
 
         ${session.exercises.map((ex, exIndex) => `
           <div class="session-exercise">
-            <h3>${ex.name}</h3>
+            <div class="flex items-center justify-between mb-3">
+              <h3 style="margin-bottom:0">${ex.name}</h3>
+              <button class="btn btn-secondary btn-sm" onclick="showExerciseInfo('${ex.name.replace(/'/g, "\\'")}')">
+                <i class="fas fa-info-circle"></i> How to
+              </button>
+            </div>
             <div class="set-row">
               <div class="set-label">Set</div>
               <div class="set-label">Reps</div>
@@ -1166,16 +1193,59 @@
       }).join('');
     }
 
-    // Share / Import plans via URL hash
+    // Exercise info database
+    const EXERCISE_INFO = {
+      'squats': { muscles: 'Quads, glutes, hamstrings', tip: 'Keep chest up, knees tracking over toes, squat to parallel or below.', gif: 'https://media.giphy.com/media/3o7TKrMqFpFfOnYpgk/giphy.gif', search: 'barbell+squat' },
+      'romanian deadlift': { muscles: 'Hamstrings, glutes, lower back', tip: 'Hinge at the hips, keep bar close to legs, slight knee bend. Feel the stretch in hamstrings.', gif: null, search: 'romanian+deadlift' },
+      'leg press': { muscles: 'Quads, glutes, hamstrings', tip: 'Feet shoulder-width apart. Don\'t lock out knees at the top. Control the descent.', gif: null, search: 'leg+press+machine' },
+      'leg extension': { muscles: 'Quadriceps (isolation)', tip: 'Extend fully, hold 1 sec at top. Avoid using momentum. Great for VMO activation.', gif: null, search: 'leg+extension+machine' },
+      'leg curl': { muscles: 'Hamstrings (isolation)', tip: 'Curl fully, squeeze at top. Keep hips pressed down. Slow on the way back.', gif: null, search: 'lying+leg+curl' },
+      'calf raises': { muscles: 'Gastrocnemius, soleus', tip: 'Full range of motion — stretch at bottom, squeeze at top. Slow and controlled.', gif: null, search: 'standing+calf+raise' },
+      'bench press': { muscles: 'Chest, triceps, front delts', tip: 'Retract shoulder blades, slight arch in lower back, bar to lower chest.', gif: null, search: 'barbell+bench+press' },
+      'pull-ups': { muscles: 'Lats, biceps, rear delts', tip: 'Full hang at bottom, chin over bar at top. Avoid kipping unless training for it.', gif: null, search: 'pull+ups' },
+      'deadlift': { muscles: 'Full posterior chain', tip: 'Bar over mid-foot, hinge to grip, chest up, drive through the floor.', gif: null, search: 'barbell+deadlift' },
+    };
+
+    function getExerciseInfo(name) {
+      const key = name.toLowerCase();
+      for (const [k, v] of Object.entries(EXERCISE_INFO)) {
+        if (key.includes(k)) return v;
+      }
+      return null;
+    }
+
+    function showExerciseInfo(name) {
+      const info = getExerciseInfo(name);
+      const modal = document.getElementById('exercise-info-modal');
+      document.getElementById('exercise-info-name').textContent = name;
+      if (info) {
+        document.getElementById('exercise-info-muscles').textContent = info.muscles;
+        document.getElementById('exercise-info-tip').textContent = info.tip;
+        const ytUrl = `https://www.youtube.com/results?search_query=${info.search}+form+tutorial`;
+        document.getElementById('exercise-info-link').href = ytUrl;
+        document.getElementById('exercise-info-link').style.display = 'inline-flex';
+      } else {
+        document.getElementById('exercise-info-muscles').textContent = 'No info available';
+        document.getElementById('exercise-info-tip').textContent = 'Search online for proper form tips.';
+        document.getElementById('exercise-info-link').style.display = 'none';
+      }
+      modal.classList.add('active');
+    }
+
+    function closeExerciseInfoModal() {
+      document.getElementById('exercise-info-modal').classList.remove('active');
+    }
+
+    // Share / Import plans via query param (NOT hash — Safari strips hash when opening from apps)
     function sharePlan(planId) {
       const plan = GymDB.plans.find(p => p.id === planId);
       if (!plan) return;
 
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(plan))));
-      const url = `${location.origin}${location.pathname}#import=${encoded}`;
+      const url = `https://vavdoshka.github.io/gym-log/?plan=${encoded}`;
 
       if (navigator.share) {
-        navigator.share({ title: plan.name, text: `Check out my workout plan: ${plan.name}`, url })
+        navigator.share({ title: plan.name, url })
           .catch(() => copyShareUrl(url));
       } else {
         copyShareUrl(url);
@@ -1184,7 +1254,7 @@
 
     function copyShareUrl(url) {
       navigator.clipboard.writeText(url).then(() => {
-        showToast('📋 Share link copied! Open it on any device to import this plan.');
+        showToast('📋 Link copied! Send it to any device to import this plan.');
       }).catch(() => {
         prompt('Copy this link to share the plan:', url);
       });
@@ -1193,14 +1263,15 @@
     let _pendingImportPlan = null;
 
     function checkImportFromUrl() {
-      const hash = location.hash;
-      if (!hash.startsWith('#import=')) return;
+      // Check query param (?plan=) — more reliable than hash across browsers/apps
+      const params = new URLSearchParams(location.search);
+      const encoded = params.get('plan');
+      if (!encoded) return;
 
-      // Clear the hash immediately so it doesn't re-trigger on reload
+      // Clear the param immediately so it doesn't re-trigger on reload
       history.replaceState(null, '', location.pathname);
 
       try {
-        const encoded = hash.slice(8);
         const plan = JSON.parse(decodeURIComponent(escape(atob(encoded))));
         plan.id = generateId();
         plan.created = new Date().toISOString();
