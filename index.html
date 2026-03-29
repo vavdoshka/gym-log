@@ -602,6 +602,26 @@
     </div>
   </div>
 
+  <!-- Import Plan Modal -->
+  <div class="modal-overlay" id="import-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">📥 Import Workout Plan</div>
+      </div>
+      <p style="color: var(--muted); font-size: 14px; margin-bottom: 16px;">Someone shared this plan with you:</p>
+      <div class="card mb-3">
+        <div class="card-title" id="import-plan-name"></div>
+        <ul id="import-plan-exercises" style="margin-top: 8px; padding-left: 18px; font-size: 14px; color: var(--muted); line-height: 1.8;"></ul>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="confirmImport()">
+        <i class="fas fa-download"></i> Import Plan
+      </button>
+      <button class="btn btn-secondary btn-block mt-2" onclick="cancelImport()">
+        Cancel
+      </button>
+    </div>
+  </div>
+
   <!-- Session Complete Modal -->
   <div class="modal-overlay" id="complete-modal">
     <div class="modal">
@@ -1170,33 +1190,49 @@
       });
     }
 
+    let _pendingImportPlan = null;
+
     function checkImportFromUrl() {
       const hash = location.hash;
       if (!hash.startsWith('#import=')) return;
 
+      // Clear the hash immediately so it doesn't re-trigger on reload
+      history.replaceState(null, '', location.pathname);
+
       try {
         const encoded = hash.slice(8);
         const plan = JSON.parse(decodeURIComponent(escape(atob(encoded))));
-
-        // Give it a fresh ID so it doesn't conflict
         plan.id = generateId();
         plan.created = new Date().toISOString();
-
-        const confirmed = confirm(`Import workout plan "${plan.name}"?\n\n${plan.exercises.length} exercise(s):\n${plan.exercises.map(e => `• ${e.name} — ${e.sets}×${e.reps} @ ${e.weight}kg`).join('\n')}`);
-
-        if (confirmed) {
-          const plans = GymDB.plans;
-          plans.push(plan);
-          GymDB.plans = plans;
-          loadHomePage();
-          showToast(`✅ "${plan.name}" imported successfully!`);
-        }
-
-        // Clear the hash so it doesn't re-trigger
-        history.replaceState(null, '', location.pathname);
+        _pendingImportPlan = plan;
+        showImportModal(plan);
       } catch (e) {
         console.error('Import failed:', e);
       }
+    }
+
+    function showImportModal(plan) {
+      const overlay = document.getElementById('import-modal');
+      document.getElementById('import-plan-name').textContent = plan.name;
+      document.getElementById('import-plan-exercises').innerHTML =
+        plan.exercises.map(e => `<li>${e.name} — ${e.sets}×${e.reps} @ ${e.weight}kg</li>`).join('');
+      overlay.classList.add('active');
+    }
+
+    function confirmImport() {
+      if (!_pendingImportPlan) return;
+      const plans = GymDB.plans;
+      plans.push(_pendingImportPlan);
+      GymDB.plans = plans;
+      _pendingImportPlan = null;
+      document.getElementById('import-modal').classList.remove('active');
+      loadHomePage();
+      showToast(`✅ Plan imported successfully!`);
+    }
+
+    function cancelImport() {
+      _pendingImportPlan = null;
+      document.getElementById('import-modal').classList.remove('active');
     }
 
     function showToast(msg) {
