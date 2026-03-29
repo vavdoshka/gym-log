@@ -8,6 +8,7 @@
   <meta http-equiv="Expires" content="0">
   <title>GymLog 🏋️</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     :root {
       --bg: #0f0f0f;
@@ -503,9 +504,14 @@
       <p>Create and manage your workout routines</p>
     </div>
 
-    <button class="btn btn-primary btn-block mb-4" onclick="openPlanModal()">
-      <i class="fas fa-plus"></i> New Plan
-    </button>
+    <div class="flex gap-2 mb-4">
+      <button class="btn btn-primary" style="flex:1" onclick="openPlanModal()">
+        <i class="fas fa-plus"></i> New Plan
+      </button>
+      <button class="btn btn-secondary" onclick="openImportCodeModal()">
+        <i class="fas fa-download"></i> Import
+      </button>
+    </div>
 
     <div id="plans-list"></div>
   </div>
@@ -602,6 +608,39 @@
       <button class="btn btn-primary btn-block" onclick="savePlan()">
         <i class="fas fa-save"></i> Save Plan
       </button>
+    </div>
+  </div>
+
+  <!-- Share Plan Modal (QR + code) -->
+  <div class="modal-overlay" id="share-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">📤 Share Plan</div>
+        <button class="modal-close" onclick="closeShareModal()">&times;</button>
+      </div>
+      <div class="card-title mb-2" id="share-plan-name"></div>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Scan QR with your phone, or copy the code and paste it on another device.</p>
+      <div id="share-qr" style="display:flex;justify-content:center;margin-bottom:16px;border-radius:12px;overflow:hidden;"></div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="share-code-box" type="text" readonly style="font-size:12px;font-family:monospace;flex:1;" onclick="this.select()">
+        <button class="btn btn-secondary" onclick="copyShareCode()" style="flex-shrink:0;"><i class="fas fa-copy"></i></button>
+      </div>
+      <button class="btn btn-primary btn-block mt-2" onclick="closeShareModal()">Done</button>
+    </div>
+  </div>
+
+  <!-- Import from Code Modal -->
+  <div class="modal-overlay" id="import-code-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">📥 Import from Code</div>
+        <button class="modal-close" onclick="closeImportCodeModal()">&times;</button>
+      </div>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Paste the code you copied from another device.</p>
+      <div class="form-group">
+        <textarea id="import-code-input" placeholder="Paste code here..." style="font-family:monospace;font-size:12px;min-height:100px;"></textarea>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="importFromCode()"><i class="fas fa-download"></i> Import</button>
     </div>
   </div>
 
@@ -1239,49 +1278,96 @@
       document.getElementById('exercise-info-modal').classList.remove('active');
     }
 
-    // Share / Import plans via query param (NOT hash — Safari strips hash when opening from apps)
+    // Share / Import via QR code + paste code (URL was too long for mobile handoff)
     function sharePlan(planId) {
       const plan = GymDB.plans.find(p => p.id === planId);
       if (!plan) return;
 
-      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(plan))));
-      const url = `https://vavdoshka.github.io/gym-log/?plan=${encoded}`;
+      // Compact JSON — only the fields we need
+      const compact = { n: plan.name, c: plan.category, e: plan.exercises.map(ex => ({ n: ex.name, s: ex.sets, r: ex.reps, w: ex.weight })) };
+      const code = btoa(unescape(encodeURIComponent(JSON.stringify(compact))));
+      const url = `https://vavdoshka.github.io/gym-log/?plan=${code}`;
 
-      if (navigator.share) {
-        navigator.share({ title: plan.name, url })
-          .catch(() => copyShareUrl(url));
-      } else {
-        copyShareUrl(url);
-      }
+      document.getElementById('share-plan-name').textContent = plan.name;
+      document.getElementById('share-code-box').value = code;
+      document.getElementById('share-qr').innerHTML = '';
+
+      // Generate QR using qrcode.js
+      new QRCode(document.getElementById('share-qr'), {
+        text: url,
+        width: 200,
+        height: 200,
+        colorDark: '#f0f0f0',
+        colorLight: '#1a1a1a',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+
+      document.getElementById('share-modal').classList.add('active');
     }
 
-    function copyShareUrl(url) {
-      navigator.clipboard.writeText(url).then(() => {
-        showToast('📋 Link copied! Send it to any device to import this plan.');
+    function copyShareCode() {
+      const code = document.getElementById('share-code-box').value;
+      navigator.clipboard.writeText(code).then(() => {
+        showToast('📋 Code copied! Paste it on any device to import.');
       }).catch(() => {
-        prompt('Copy this link to share the plan:', url);
+        document.getElementById('share-code-box').select();
       });
+    }
+
+    function closeShareModal() {
+      document.getElementById('share-modal').classList.remove('active');
     }
 
     let _pendingImportPlan = null;
 
+    function decodeImportCode(encoded) {
+      const raw = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+      // Support both compact format {n,c,e} and full format {name,category,exercises}
+      if (raw.n) {
+        return {
+          id: generateId(),
+          name: raw.n,
+          category: raw.c || '💪 Strength',
+          exercises: (raw.e || []).map(ex => ({ id: generateId(), name: ex.n, sets: ex.s, reps: ex.r, weight: ex.w })),
+          created: new Date().toISOString()
+        };
+      }
+      return { ...raw, id: generateId(), created: new Date().toISOString() };
+    }
+
     function checkImportFromUrl() {
-      // Check query param (?plan=) — more reliable than hash across browsers/apps
       const params = new URLSearchParams(location.search);
       const encoded = params.get('plan');
       if (!encoded) return;
-
-      // Clear the param immediately so it doesn't re-trigger on reload
       history.replaceState(null, '', location.pathname);
-
       try {
-        const plan = JSON.parse(decodeURIComponent(escape(atob(encoded))));
-        plan.id = generateId();
-        plan.created = new Date().toISOString();
+        const plan = decodeImportCode(encoded);
         _pendingImportPlan = plan;
         showImportModal(plan);
       } catch (e) {
         console.error('Import failed:', e);
+      }
+    }
+
+    function openImportCodeModal() {
+      document.getElementById('import-code-input').value = '';
+      document.getElementById('import-code-modal').classList.add('active');
+    }
+
+    function closeImportCodeModal() {
+      document.getElementById('import-code-modal').classList.remove('active');
+    }
+
+    function importFromCode() {
+      const code = document.getElementById('import-code-input').value.trim();
+      if (!code) return;
+      try {
+        const plan = decodeImportCode(code);
+        _pendingImportPlan = plan;
+        closeImportCodeModal();
+        showImportModal(plan);
+      } catch(e) {
+        showToast('❌ Invalid code. Please check and try again.');
       }
     }
 
